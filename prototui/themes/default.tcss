@@ -1,0 +1,178 @@
+/* Default theme for TUI Library */
+/* Uses Textual's built-in design tokens: $primary, $accent, $text, etc. */
+
+/* LayeredDataTable styles */
+LayeredDataTable {
+    border: solid $primary;
+    height: 1fr;
+}
+
+LayeredDataTable DataTable {
+    height: 1fr;
+}
+
+/* ExplanationPanel styles */
+ExplanationPanel {
+    border: solid $secondary;
+    padding: 1 2;
+    height: auto;
+    background: $panel;
+}
+
+ExplanationPanel .explanation--title {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+ExplanationPanel .explanation--content {
+    color: $text-muted;
+}
+
+ExplanationPanel .explanation--hint {
+    color: $text-disabled;
+    text-style: italic;
+    margin-top: 1;
+}
+
+/* DashboardScreen layout */
+DashboardScreen {
+    layout: grid;
+    grid-size: 2 1;
+    grid-columns: 3fr 1fr;
+    padding: 1;
+}
+
+DashboardScreen .dashboard--main {
+    height: 1fr;
+}
+
+DashboardScreen .dashboard--sidebar {
+    height: 1fr;
+}
+
+/* Common button styles */
+.btn-primary {
+    background: $primary;
+    color: $text;
+    border: none;
+}
+
+.btn-primary:hover {
+    background: $primary-lighten-1;
+}
+
+.btn-secondary {
+    background: $secondary;
+    color: $text;
+    border: none;
+}
+
+.btn-secondary:hover {
+    background: $secondary-lighten-1;
+}
+
+/* Status indicators */
+.status-success {
+    color: $success;
+}
+
+.status-error {
+    color: $error;
+}
+
+.status-warning {
+    color: $warning;
+}
+
+.status-pending {
+    color: $text-muted;
+}
+
+/* Helper classes */
+.hidden {
+    display: none;
+}
+
+.bold {
+    text-style: bold;
+}
+
+.italic {
+    text-style: italic;
+}
+
+.center {
+    text-align: center;
+}
+
+/* UniversalScreen layout */
+UniversalScreen {
+    layout: vertical;
+}
+
+#universal-screen-content {
+    height: 1fr;
+}
+
+#main-content {
+    width: 3fr;
+    padding: 1 2;
+    overflow-y: auto;
+}
+
+#screen-title {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+#screen-message {
+    margin-bottom: 2;
+    color: $text;
+}
+
+.field-label {
+    margin-top: 1;
+    margin-bottom: 0;
+    color: $text;
+}
+
+.field-message {
+    margin: 1 0;
+    color: $text-muted;
+}
+
+.boolean-field {
+    margin: 1 0;
+    padding: 0 1;
+    background: $boost;
+}
+
+/* Field widgets */
+#main-content Input {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#main-content LayeredDataTable {
+    /* Height is set dynamically when auto_height=True, otherwise fills space */
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+/* Validation error styling */
+.field-error {
+    border: thick $error;
+}
+
+.field-error Input {
+    border: thick $error;
+}
+
+/* Explanation panel in UniversalScreen */
+#universal-screen-content #explanation-panel {
+    width: 2fr;
+    height: 1fr;
+    overflow-y: auto;
+}

@@ -1,0 +1,32 @@
+# Virtual environments
+.venv
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+prototui-builder.zip
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Textual
+.textual/

@@ -1,0 +1,452 @@
+#!/usr/bin/env python3
+"""
+Generate install.sh for TUI applications.
+
+Supports two modes:
+1. Auto-discovery: Scans directory for apps with main.py
+2. YAML config: Uses apps.yaml for explicit configuration
+
+Usage:
+    # Auto-discover apps
+    python scripts/generate-installer.py --auto
+
+    # Use apps.yaml
+    python scripts/generate-installer.py
+
+Auto-discovery looks for:
+- Directories with main.py or __main__.py
+- First line of module docstring becomes description
+- Entry point is inferred from structure
+"""
+
+import os
+import sys
+import ast
+import argparse
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
+
+def discover_apps(repo_root: Path) -> List[Dict[str, Any]]:
+    """Auto-discover TUI apps in the repository."""
+    apps = []
+
+    # Common patterns for app locations
+    search_dirs = [
+        repo_root / "tui",
+        repo_root / "app",
+        repo_root / "apps",
+        repo_root / "tools",
+        repo_root / "commands",
+        repo_root / "cli",
+        repo_root,  # Root level
+    ]
+
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+
+        for item in search_dir.iterdir():
+            if not item.is_dir():
+                continue
+
+            # Skip common non-app directories
+            if item.name in {".venv", ".git", "node_modules", "__pycache__",
+                           "prototui", "examples", "tests", ".claude"}:
+                continue
+
+            # Look for main.py or __main__.py
+            main_py = item / "main.py"
+            main_module = item / "__main__.py"
+
+            if main_py.exists():
+                app = extract_app_info(item, main_py, repo_root)
+                if app:
+                    apps.append(app)
+            elif main_module.exists():
+                app = extract_app_info(item, main_module, repo_root)
+                if app:
+                    apps.append(app)
+
+    return apps
+
+
+def extract_app_info(app_dir: Path, main_file: Path, repo_root: Path) -> Optional[Dict[str, Any]]:
+    """Extract app information from main file."""
+    try:
+        with open(main_file) as f:
+            content = f.read()
+
+        # Parse Python to get module docstring
+        tree = ast.parse(content)
+        docstring = ast.get_docstring(tree)
+
+        if not docstring:
+            description = f"TUI application: {app_dir.name}"
+        else:
+            # Use first line of docstring as description
+            description = docstring.strip().split('\n')[0]
+
+        # Generate entry point
+        # Convert path relative to repo root to module path
+        rel_path = app_dir.relative_to(repo_root)
+        module_path = str(rel_path).replace('/', '.')
+
+        # Check if there's a main() or run() function
+        has_main = 'def main(' in content
+        has_run = 'def run(' in content
+
+        if has_main:
+            entry_point = f"{module_path}.main:main"
+        elif has_run:
+            entry_point = f"{module_path}.main:run"
+        else:
+            # Just run as module
+            entry_point = f"{module_path}.main"
+
+        # Convert directory name to command name (e.g., my_app -> my-app)
+        name = app_dir.name.replace('_', '-')
+
+        return {
+            "name": name,
+            "description": description,
+            "entry_point": entry_point,
+        }
+
+    except Exception as e:
+        print(f"Warning: Could not parse {main_file}: {e}", file=sys.stderr)
+        return None
+
+
+def read_apps_config(config_path: Path) -> Dict[str, Any]:
+    """Read apps configuration from YAML file."""
+    try:
+        import yaml
+    except ImportError:
+        print("Error: PyYAML not found. Install with: pip install pyyaml")
+        print("Or use --auto for auto-discovery (no YAML needed)")
+        sys.exit(1)
+
+    if not config_path.exists():
+        print(f"Error: Config file not found: {config_path}")
+        print("\nUse --auto for auto-discovery, or create apps.yaml:")
+        print(EXAMPLE_CONFIG)
+        sys.exit(1)
+
+    with open(config_path) as f:
+        return yaml.safe_load(f)
+
+
+def generate_installer(apps: List[Dict[str, Any]], output_path: Path) -> None:
+    """Generate install.sh from app list."""
+
+    if not apps:
+        print("Error: No apps found")
+        sys.exit(1)
+
+    # Determine if single or multi-app
+    is_multi_app = len(apps) > 1
+
+    script = generate_installer_script(apps, is_multi_app)
+
+    output_path.write_text(script)
+    output_path.chmod(0o755)
+
+    print(f"✓ Generated {output_path}")
+    print(f"  Apps: {', '.join(app['name'] for app in apps)}")
+    print(f"\nUsers can now run: ./{output_path.name}")
+
+
+def generate_installer_script(apps: List[Dict[str, Any]], is_multi_app: bool) -> str:
+    """Generate the install.sh script content (bash 3.x compatible)."""
+
+    # Header
+    script = """#!/bin/bash
+# Interactive installer for TUI applications
+# Generated by scripts/generate-installer.py
+# Compatible with bash 3.x (macOS default)
+
+set -e
+
+# Colors for output
+RED='\\033[0;31m'
+GREEN='\\033[0;32m'
+YELLOW='\\033[1;33m'
+NC='\\033[0m' # No Color
+
+# Get the absolute path of this repo
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo "=== TUI Application Installer ==="
+echo "Repo: $REPO_DIR"
+echo
+"""
+
+    # Multi-app selection (bash 3.x compatible - no associative arrays)
+    if is_multi_app:
+        script += generate_multi_app_selection_bash3(apps)
+    else:
+        script += f"# Single app installation\n"
+        script += f"SELECTED_APPS=\"{apps[0]['name']}\"\n"
+        script += f"echo \"Will install: {apps[0]['name']}\"\n"
+        script += f'echo "  {apps[0].get("description", "No description")}"\n'
+        script += f"echo\n\n"
+
+    # Common questions
+    script += """
+# Ask about auto-update
+echo
+read -p "Enable auto-update on launch? (y/n) [n]: " AUTO_UPDATE
+AUTO_UPDATE=${AUTO_UPDATE:-n}
+
+# Ask about install location
+echo
+read -p "Install commands to which directory? [~/bin]: " INSTALL_DIR
+INSTALL_DIR=${INSTALL_DIR:-~/bin}
+INSTALL_DIR=$(eval echo "$INSTALL_DIR")  # Expand ~
+
+# Create install directory if needed
+mkdir -p "$INSTALL_DIR"
+
+echo
+echo "Installing selected apps..."
+echo
+
+"""
+
+    # Generate wrapper for each app
+    for app in apps:
+        script += generate_app_wrapper_bash3(app, is_multi_app)
+
+    # Footer
+    script += """
+# Check if install dir is in PATH
+if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+    echo
+    echo -e "${YELLOW}Warning: $INSTALL_DIR is not in your PATH${NC}"
+    echo "Add this to your ~/.zshrc or ~/.bashrc:"
+    echo "  export PATH=\\"$INSTALL_DIR:\\$PATH\\""
+    echo
+fi
+
+echo -e "${GREEN}✓ Installation complete!${NC}"
+echo
+echo "Installed commands:"
+if [[ -n "$SELECTED_APPS" ]]; then
+    for app in $SELECTED_APPS; do
+        echo "  - $app"
+    done
+fi
+echo
+echo "Settings:"
+echo "  Auto-update: $AUTO_UPDATE"
+echo "  Location: $INSTALL_DIR"
+echo
+"""
+
+    return script
+
+
+def generate_multi_app_selection_bash3(apps: List[Dict[str, Any]]) -> str:
+    """Generate multi-app selection code (bash 3.x compatible)."""
+
+    script = f"""
+# Available apps (bash 3.x compatible)
+APP_COUNT={len(apps)}
+"""
+
+    # Generate parallel arrays for names and descriptions
+    for i, app in enumerate(apps):
+        script += f'APP_NAME_{i}="{app["name"]}"\n'
+        script += f'APP_DESC_{i}="{app.get("description", "No description")}"\n'
+
+    script += """
+echo "Available applications:"
+i=0
+while [[ $i -lt $APP_COUNT ]]; do
+    idx=$((i + 1))
+    eval "name=\\$APP_NAME_$i"
+    eval "desc=\\$APP_DESC_$i"
+    echo "  [$idx] $name"
+    echo "    $desc"
+    i=$((i + 1))
+done
+
+echo
+echo "Select apps to install (space-separated numbers, or 'all'):"
+read -p "> " selection
+
+# Parse selection
+SELECTED_APPS=""
+if [[ "$selection" == "all" ]]; then
+    i=0
+    while [[ $i -lt $APP_COUNT ]]; do
+        eval "name=\\$APP_NAME_$i"
+        SELECTED_APPS="$SELECTED_APPS $name"
+        i=$((i + 1))
+    done
+else
+    for num in $selection; do
+        idx=$((num - 1))
+        if [[ $idx -ge 0 && $idx -lt $APP_COUNT ]]; then
+            eval "name=\\$APP_NAME_$idx"
+            SELECTED_APPS="$SELECTED_APPS $name"
+        fi
+    done
+fi
+
+SELECTED_APPS=$(echo "$SELECTED_APPS" | xargs)  # Trim whitespace
+
+if [[ -z "$SELECTED_APPS" ]]; then
+    echo -e "${RED}Error: No apps selected${NC}"
+    exit 1
+fi
+
+echo
+echo "Will install: $SELECTED_APPS"
+"""
+
+    return script
+
+
+def generate_app_wrapper_bash3(app: Dict[str, Any], is_multi_app: bool) -> str:
+    """Generate wrapper script code for a single app (bash 3.x compatible)."""
+
+    name = app["name"]
+    entry_point = app["entry_point"]
+
+    # Determine how to run the app
+    if ":" in entry_point:
+        # Python module:function format
+        module, func = entry_point.split(":")
+        run_cmd = f'"$VENV_DIR/bin/python" -c "from {module} import {func}; {func}()"'
+    else:
+        # Python module format (e.g., "scripts.my_app")
+        run_cmd = f'"$VENV_DIR/bin/python" -m {entry_point}'
+
+    check = f'[[ " $SELECTED_APPS " == *" {name} "* ]]' if is_multi_app else 'true'
+
+    script = f"""
+# Install {name}
+if {check}; then
+    cat > "$INSTALL_DIR/{name}" <<'WRAPPER_EOF'
+#!/bin/bash
+# Auto-generated wrapper for {name}
+# Repo: REPO_DIR_PLACEHOLDER
+
+REPO_DIR="REPO_DIR_PLACEHOLDER"
+VENV_DIR="$REPO_DIR/.venv"
+
+# Auto-update (configured during install)
+AUTO_UPDATE_PLACEHOLDER
+
+# Setup venv if missing (first run)
+if [ ! -d "$VENV_DIR" ]; then
+    echo "First run: Setting up environment..." >&2
+    python3 -m venv "$VENV_DIR"
+    "$VENV_DIR/bin/pip" install -q -e "$REPO_DIR"
+fi
+
+# Check if dependencies need updating
+if [ "$REPO_DIR/pyproject.toml" -nt "$VENV_DIR/.installed" ]; then
+    echo "Updating dependencies..." >&2
+    "$VENV_DIR/bin/pip" install -q -e "$REPO_DIR"
+    touch "$VENV_DIR/.installed"
+fi
+
+# Run the app
+{run_cmd} "$@"
+WRAPPER_EOF
+
+    # Replace placeholders
+    sed -i.bak "s|REPO_DIR_PLACEHOLDER|$REPO_DIR|g" "$INSTALL_DIR/{name}"
+
+    if [[ "$AUTO_UPDATE" == "y" ]]; then
+        sed -i.bak "s|AUTO_UPDATE_PLACEHOLDER|cd \\"\\$REPO_DIR\\" \\&\\& git pull -q 2>/dev/null \\|\\| true|" "$INSTALL_DIR/{name}"
+    else
+        sed -i.bak "s|AUTO_UPDATE_PLACEHOLDER|# Auto-update disabled|" "$INSTALL_DIR/{name}"
+    fi
+
+    rm -f "$INSTALL_DIR/{name}.bak"
+    chmod +x "$INSTALL_DIR/{name}"
+
+    echo "  ✓ Installed {name}"
+fi
+"""
+
+    return script
+
+
+EXAMPLE_CONFIG = """
+# Example apps.yaml
+
+apps:
+  - name: my-tui-app
+    description: My awesome TUI application
+    entry_point: my_app.main:run
+    # entry_point formats:
+    #   - "module.path:function" (calls function())
+    #   - "module.path" (runs as python -m module.path)
+
+  - name: another-app
+    description: Another TUI tool
+    entry_point: tools.another:main
+"""
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description="Generate install.sh for TUI applications")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Auto-discover apps (no apps.yaml needed)"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output path for install.sh (default: repo_root/install.sh)"
+    )
+
+    args = parser.parse_args()
+
+    # Script is now at tui/prototui/installer_gen.py
+    repo_root = Path(__file__).parent.parent.parent
+    config_path = repo_root / "apps.yaml"
+    output_path = args.output or (repo_root / "install.sh")
+
+    print("TUI Application Installer Generator")
+    print("=" * 40)
+    print()
+
+    # Get app list
+    if args.auto:
+        print("Mode: Auto-discovery")
+        print()
+        apps = discover_apps(repo_root)
+        if not apps:
+            print("No apps discovered. Looking for directories with main.py")
+            sys.exit(1)
+        print(f"Discovered {len(apps)} app(s):")
+        for app in apps:
+            print(f"  - {app['name']}: {app['description']}")
+        print()
+    else:
+        print("Mode: apps.yaml configuration")
+        print()
+        config = read_apps_config(config_path)
+        apps = config.get("apps", [])
+
+    # Generate installer
+    generate_installer(apps, output_path)
+
+    print()
+    print("Next steps:")
+    print("1. Review the generated install.sh")
+    print("2. Commit it to your repo")
+    print("3. Users run: git clone <repo> && cd <repo> && ./install.sh")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,43 @@
+# TUI Application Definitions
+# This file defines which TUI apps should be installable from this repo
+#
+# After editing, run: python scripts/generate-installer.py
+# This creates install.sh that users can run to install your apps
+
+apps:
+  # Example: Single TUI app
+  - name: my-tui-app
+    description: My awesome TUI application
+    entry_point: my_app.main:run
+    # entry_point can be:
+    #   - "module.path:function" → Calls function() when app runs
+    #   - "module.path" → Runs as `python -m module.path`
+
+  # Example: Multiple apps in one repo
+  # - name: tui-tool-1
+  #   description: First TUI tool
+  #   entry_point: tools.tool1:main
+  #
+  # - name: tui-tool-2
+  #   description: Second TUI tool
+  #   entry_point: tools.tool2:run
+
+# Single app example:
+# apps:
+#   - name: sync-tool
+#     description: Sync tool with TUI interface
+#     entry_point: scripts.sync_tui:main
+
+# Multi-app example:
+# apps:
+#   - name: deploy-manager
+#     description: Manage deployments interactively
+#     entry_point: tools.deploy:run
+#
+#   - name: service-monitor
+#     description: Monitor services with live updates
+#     entry_point: tools.monitor:main
+#
+#   - name: config-editor
+#     description: Edit configuration files
+#     entry_point: tools.config:edit
