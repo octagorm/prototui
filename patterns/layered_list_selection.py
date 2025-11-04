@@ -280,10 +280,7 @@ class LayeredListSelectionApp(App):
 
 
 if __name__ == "__main__":
-    # Optional: Use terminal_setup for better colors across terminals (iTerm2, IntelliJ, VS Code)
-    # from utilities.terminal_setup import run_app_with_best_colors
-    # app = LayeredListSelectionApp()
-    # run_app_with_best_colors(app)
+    from utilities.terminal_compat import run_app
 
     app = LayeredListSelectionApp()
-    app.run()
+    run_app(app)  # Handles colors + IntelliJ mouse issues

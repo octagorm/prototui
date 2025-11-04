@@ -287,36 +287,52 @@ state.watch("current_step", on_step_change)
 state.set("current_step", 2)  # Triggers callback
 ```
 
-### TerminalSetup
-**File:** `utilities/terminal_setup.py`
+### Terminal Compatibility (IMPORTANT)
+**File:** `utilities/terminal_compat.py`
 
-Optional utility to enhance color support across different terminals (iTerm2, IntelliJ IDEA, VS Code, etc.).
+**CRITICAL**: Always use this instead of `app.run()` to ensure proper colors across terminals.
 
-**The problem:** Some terminals (like IntelliJ) don't advertise truecolor support even though they have it, causing TUIs to look less polished.
+**Problems this solves:**
+1. **Colors**: Some terminals (like IntelliJ) don't advertise truecolor support even though they have it
 
-**The solution:** This utility detects terminal capabilities and safely upgrades to truecolor when appropriate.
+**The solution:**
+- Detects terminal capabilities and enables truecolor when appropriate
+- Sets `COLORTERM=truecolor` at import time (before App instantiation)
+- Provides environment variable overrides for user control
 
 **Usage:**
 ```python
-from utilities.terminal_setup import run_app_with_best_colors
+from utilities.terminal_compat import run_app
 
 app = MyApp()
-run_app_with_best_colors(app)  # That's it!
+run_app(app)  # Auto-handles colors!
 
-# Or manually:
-from utilities.terminal_setup import enhance_terminal_for_tui
+# Disable mouse if preferred (keyboard-only mode):
+run_app(app, mouse=False)
 
-color_system = enhance_terminal_for_tui()
-app.run(color_system=color_system)
+# With other run args:
+run_app(app, inline=True)
 ```
 
-**Features:**
-- Detects IntelliJ/JetBrains terminals and enables truecolor
-- Safe upgrades (256color → truecolor) for modern terminals
-- Escape hatch via `TUI_COLOR_SYSTEM` env var
-- Optional: sets `COLORTERM=truecolor` for child processes
+**What it does automatically:**
+- ✅ Detects IntelliJ/JetBrains terminal → enables truecolor
+- ✅ Detects 256color terminals → upgrades to truecolor
+- ✅ Sets `COLORTERM=truecolor` for child processes
+- ✅ Respects user env var overrides
 
-**When to use:** Copy this into your project if you want consistent colors across terminals without users needing to configure anything.
+**Why this matters:** Without this, colors look washed out in IntelliJ IDEA's terminal. All patterns use this by default.
+
+**About IntelliJ mouse behavior:**
+IntelliJ's terminal (JediTerm) has slightly glitchy mouse scrolling - it can feel fast or jumpy. This is a known limitation of the terminal emulator. Users who prefer keyboard-only mode can disable mouse:
+
+**Environment variable overrides:**
+```bash
+# Disable mouse globally (keyboard-only mode)
+export TUI_MOUSE=false
+
+# Force specific color system
+export TUI_COLOR_SYSTEM=256
+```
 
 ---
 
@@ -339,6 +355,7 @@ Reusable side panel widget for two-pane layouts showing help/explanation text.
 **Usage:**
 ```python
 from utilities.explanation_panel import ExplanationPanel
+from textual.containers import VerticalScroll
 
 # In compose()
 with VerticalScroll(id="explanation-pane"):
