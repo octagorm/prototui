@@ -25,3 +25,5 @@ __pycache__/
 
 # Claude
 .claude/
+
+patterns/persistent_storage.json
