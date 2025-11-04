@@ -73,22 +73,22 @@ def enhance_terminal_for_tui(
         quiet: Don't print detection info
 
     Returns:
-        ColorSystem: The color system to use with app.run(color_system=...)
+        ColorSystem: The detected color system (mainly for informational purposes)
 
     Usage:
-        # Simple: Just get the best color system
+        # Simple: Just enhance and run
         from utilities.terminal_setup import enhance_terminal_for_tui
 
-        color_system = enhance_terminal_for_tui()
-        app.run(color_system=color_system)
+        enhance_terminal_for_tui()  # Sets COLORTERM=truecolor
+        app.run()  # Textual will auto-detect the enhanced colors
 
         # Aggressive: Force truecolor everywhere
-        color_system = enhance_terminal_for_tui(force_truecolor=True)
-        app.run(color_system=color_system)
+        enhance_terminal_for_tui(force_truecolor=True)
+        app.run()
 
         # Conservative: Detect but don't set env var
-        color_system = enhance_terminal_for_tui(set_env_var=False)
-        app.run(color_system=color_system)
+        enhance_terminal_for_tui(set_env_var=False)
+        app.run()
     """
     # Check for user override via env var
     user_override = os.environ.get("TUI_COLOR_SYSTEM", "").lower()
@@ -134,11 +134,9 @@ def run_app_with_best_colors(app, **run_kwargs):
         # Or with custom run args:
         run_app_with_best_colors(app, mouse=False, inline=True)
     """
-    color_system = enhance_terminal_for_tui()
-
-    # Only set color_system if not already specified
-    if "color_system" not in run_kwargs:
-        run_kwargs["color_system"] = color_system
+    # Set environment variable for better color detection
+    # Textual will automatically detect this
+    enhance_terminal_for_tui()
 
     return app.run(**run_kwargs)
 
