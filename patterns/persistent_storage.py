@@ -942,5 +942,10 @@ class PersistentStorageApp(App):
 
 
 if __name__ == "__main__":
+    # Optional: Use terminal_setup for better colors across terminals (iTerm2, IntelliJ, VS Code)
+    # from utilities.terminal_setup import run_app_with_best_colors
+    # app = PersistentStorageApp()
+    # run_app_with_best_colors(app)
+
     app = PersistentStorageApp()
     app.run()

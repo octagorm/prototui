@@ -319,5 +319,10 @@ class LayeredMultiSelectApp(App):
 
 
 if __name__ == "__main__":
+    # Optional: Use terminal_setup for better colors across terminals (iTerm2, IntelliJ, VS Code)
+    # from utilities.terminal_setup import run_app_with_best_colors
+    # app = LayeredMultiSelectApp()
+    # run_app_with_best_colors(app)
+
     app = LayeredMultiSelectApp()
     app.run()

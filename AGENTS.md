@@ -287,6 +287,39 @@ state.watch("current_step", on_step_change)
 state.set("current_step", 2)  # Triggers callback
 ```
 
+### TerminalSetup
+**File:** `utilities/terminal_setup.py`
+
+Optional utility to enhance color support across different terminals (iTerm2, IntelliJ IDEA, VS Code, etc.).
+
+**The problem:** Some terminals (like IntelliJ) don't advertise truecolor support even though they have it, causing TUIs to look less polished.
+
+**The solution:** This utility detects terminal capabilities and safely upgrades to truecolor when appropriate.
+
+**Usage:**
+```python
+from utilities.terminal_setup import run_app_with_best_colors
+
+app = MyApp()
+run_app_with_best_colors(app)  # That's it!
+
+# Or manually:
+from utilities.terminal_setup import enhance_terminal_for_tui
+
+color_system = enhance_terminal_for_tui()
+app.run(color_system=color_system)
+```
+
+**Features:**
+- Detects IntelliJ/JetBrains terminals and enables truecolor
+- Safe upgrades (256color → truecolor) for modern terminals
+- Escape hatch via `TUI_COLOR_SYSTEM` env var
+- Optional: sets `COLORTERM=truecolor` for child processes
+
+**When to use:** Copy this into your project if you want consistent colors across terminals without users needing to configure anything.
+
+---
+
 ### ExplanationPanel
 **File:** `utilities/explanation_panel.py`
 
