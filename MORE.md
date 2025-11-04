@@ -1,0 +1,2 @@
+- Multi-level hotkeys (press b first, then see a different footer of hotkeys, or press esc to go back to the main one maybe?)
+- A pattern that saves certain things to a file for long term memory

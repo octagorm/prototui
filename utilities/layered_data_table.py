@@ -11,8 +11,9 @@ from textual.binding import Binding
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Input, Static
 from textual.widgets.data_table import RowKey
+from textual.containers import Vertical
 
 
 @dataclass
@@ -67,8 +68,42 @@ class LayeredDataTable(Widget):
         "layered-data-table--layer-header",
     }
 
+    DEFAULT_CSS = """
+    LayeredDataTable {
+        height: auto;
+    }
+
+    LayeredDataTable #filter-info {
+        height: auto;
+        padding: 0 1;
+        color: $text-muted;
+        text-style: italic;
+    }
+
+    LayeredDataTable #filter-info.filter-hidden {
+        display: none;
+    }
+
+    LayeredDataTable #filter-input {
+        margin: 0 1 1 1;
+    }
+
+    LayeredDataTable #filter-input.filter-hidden {
+        display: none;
+    }
+
+    LayeredDataTable #data-table {
+        height: 100%;
+    }
+    """
+
     BINDINGS = [
         Binding("space", "toggle_selection", "Toggle", show=False),
+        # Disable Page Up/Down/Home/End (not available on Macs)
+        Binding("pageup", "do_nothing", "", show=False),
+        Binding("pagedown", "do_nothing", "", show=False),
+        Binding("home", "do_nothing", "", show=False),
+        Binding("end", "do_nothing", "", show=False),
     ]
 
     columns: reactive[list[str]] = reactive(list, init=False)
@@ -77,6 +112,7 @@ class LayeredDataTable(Widget):
     show_column_headers: reactive[bool] = reactive(True)
     select_mode: reactive[str] = reactive("single")
     auto_height: reactive[bool] = reactive(False)
+    _filter_visible: reactive[bool] = reactive(False)
 
     class RowSelected(Message):
         """Posted when a row is selected (Enter key in single-select mode)."""
@@ -120,6 +156,7 @@ class LayeredDataTable(Widget):
         multi_select: Optional[bool] = None,  # Deprecated, for backward compatibility
         cursor_type: str = "row",
         auto_height: bool = False,
+        filterable: bool = False,
         **kwargs,
     ) -> None:
         """
@@ -134,14 +171,15 @@ class LayeredDataTable(Widget):
             multi_select: (Deprecated) Use select_mode="multi" instead
             cursor_type: Cursor type ("row", "cell", or "none")
             auto_height: Whether to auto-size height based on row count (default False)
+            filterable: Whether to show filter input (press / to filter)
             **kwargs: Additional widget arguments
         """
         super().__init__(**kwargs)
         self.columns = columns or []
-        self.rows = rows or []
         self.show_layers = show_layers
         self.show_column_headers = show_column_headers
         self.auto_height = auto_height
+        self.filterable = filterable
 
         # Backward compatibility: multi_select=True maps to select_mode="multi"
         if multi_select is not None:
@@ -151,23 +189,58 @@ class LayeredDataTable(Widget):
 
         self._cursor_type = cursor_type
         self._selected_rows: set[RowKey] = set()  # Track selected rows in multi mode
+        self._filter_text: str = ""  # Current filter text
+        self._all_rows: list[TableRow] = rows or []  # All rows (before filtering)
+        self._filtered_count: int = 0  # Number of visible rows after filtering
         self._selected_row: Optional[RowKey] = None  # Track selected row in radio mode
         self._row_map: dict[RowKey, TableRow] = {}  # Map DataTable RowKey to TableRow
+        self._cursor_row_key: Optional[str] = None  # Track cursor position by row_key
+
+        # Set rows (this will be the initially displayed rows)
+        self.rows = rows or []
 
     def compose(self) -> ComposeResult:
-        """Compose the data table."""
-        yield DataTable(
-            cursor_type=self._cursor_type,
-            show_header=self.show_column_headers,
-            id="data-table"
-        )
+        """Compose the data table with optional filter."""
+        if self.filterable:
+            with Vertical():
+                yield Static("", id="filter-info", classes="filter-hidden")
+                yield Input(
+                    placeholder="Type to filter... (Tab/arrows to select from results)",
+                    id="filter-input",
+                    classes="filter-hidden",
+                    disabled=True  # Disabled when hidden to prevent focusing
+                )
+                yield DataTable(
+                    cursor_type=self._cursor_type,
+                    show_header=self.show_column_headers,
+                    id="data-table"
+                )
+        else:
+            yield DataTable(
+                cursor_type=self._cursor_type,
+                show_header=self.show_column_headers,
+                id="data-table"
+            )
 
     def on_mount(self) -> None:
         """Initialize the table when mounted."""
+        # Add Filter binding if filterable is True
+        if self.filterable:
+            # Add the filter binding dynamically
+            self._bindings.bind("/", "focus_filter", "Filter", show=True, priority=False)
+
+            # Ensure filter input is disabled and hidden on mount
+            filter_input = self.query_one("#filter-input", Input)
+            filter_input.disabled = True
+            filter_input.display = False
+
         self._rebuild_table()
-        # Hide cursor initially until focused
-        data_table = self.query_one("#data-table", DataTable)
-        data_table.show_cursor = False
+        # Show cursor if cursor_type is not "none"
+        if self._cursor_type != "none":
+            data_table = self.query_one("#data-table", DataTable)
+            data_table.show_cursor = True
+            # Focus the table so it can receive input
+            self.call_after_refresh(data_table.focus)
 
     def focus(self, scroll_visible: bool = True) -> None:
         """Focus the table (delegates to inner DataTable)."""
@@ -187,6 +260,11 @@ class LayeredDataTable(Widget):
 
     def watch_rows(self, new_rows: list[TableRow]) -> None:
         """React to rows changing."""
+        # Update all_rows only if not actively filtering
+        # (to avoid losing original data when filter updates self.rows)
+        if not self._filter_text:
+            self._all_rows = list(new_rows)
+
         if self.is_mounted:
             self._rebuild_table()
 
@@ -207,6 +285,27 @@ class LayeredDataTable(Widget):
             data_table = self.query_one("#data-table", DataTable)
             data_table.show_header = show
             self._rebuild_table()
+
+    def watch__filter_visible(self, visible: bool) -> None:
+        """React to filter visibility changing."""
+        if not self.is_mounted or not self.filterable:
+            return
+
+        filter_input = self.query_one("#filter-input", Input)
+        filter_info = self.query_one("#filter-info", Static)
+
+        if visible:
+            # Show and enable
+            filter_input.remove_class("filter-hidden")
+            filter_info.remove_class("filter-hidden")
+            filter_input.disabled = False
+            filter_input.display = True
+        else:
+            # Hide and disable
+            filter_input.add_class("filter-hidden")
+            filter_info.add_class("filter-hidden")
+            filter_input.disabled = True
+            filter_input.display = False
 
     def _rebuild_table(self) -> None:
         """Rebuild the data table from current rows and columns."""
@@ -293,8 +392,25 @@ class LayeredDataTable(Widget):
                 separator_values = [""] * (len(self.columns) + (1 if has_checkbox else 0))
                 data_table.add_row(*separator_values, key=f"separator-{layer_index}")
 
-        # Move cursor to first valid (non-header, non-separator) row
-        self._move_cursor_to_first_valid_row()
+        # Restore cursor position if we have a tracked position
+        if self._cursor_row_key:
+            cursor_restored = False
+            for dt_row_key, table_row in self._row_map.items():
+                if table_row.row_key == self._cursor_row_key:
+                    try:
+                        row_index = data_table.get_row_index(dt_row_key)
+                        data_table.move_cursor(row=row_index)
+                        cursor_restored = True
+                    except Exception:
+                        pass
+                    break
+
+            # If we couldn't restore, move to first valid row
+            if not cursor_restored:
+                self._move_cursor_to_first_valid_row()
+        else:
+            # No tracked position, move to first valid row
+            self._move_cursor_to_first_valid_row()
 
         # Set dynamic height based on number of rows (if auto_height is enabled)
         if self.auto_height:
@@ -356,8 +472,11 @@ class LayeredDataTable(Widget):
 
         if event.row_key and event.row_key in self._row_map:
             row = self._row_map[event.row_key]
+            # Track cursor position for automatic restoration
+            self._cursor_row_key = row.row_key
             self.post_message(self.RowHighlighted(row, event.row_key))
         else:
+            self._cursor_row_key = None
             self.post_message(self.RowHighlighted(None, None))
 
     def action_toggle_selection(self) -> None:
@@ -399,12 +518,101 @@ class LayeredDataTable(Widget):
             row = self._row_map[row_key]
             self.post_message(self.RowSelected(row, row_key))
 
+    def action_focus_filter(self) -> None:
+        """Focus the filter input (/ key)."""
+        if not self.filterable:
+            return
+
+        # Show the filter and focus it
+        self._filter_visible = True
+        filter_input = self.query_one("#filter-input", Input)
+        self.call_after_refresh(filter_input.focus)
+
+    def action_do_nothing(self) -> None:
+        """Dummy action to disable default bindings."""
+        pass
+
+    @on(Input.Changed, "#filter-input")
+    def on_filter_changed(self, event: Input.Changed) -> None:
+        """Handle filter text changes."""
+        self._filter_text = event.value.lower()
+        self._apply_filter()
+
+    def _apply_filter(self) -> None:
+        """Apply current filter to rows."""
+        if not self._filter_text:
+            # No filter - show all rows
+            self.rows = self._all_rows
+        else:
+            # Filter rows - search across all column values
+            filtered = []
+            for row in self._all_rows:
+                # Check if filter text matches any column value
+                match = any(
+                    self._filter_text in str(value).lower()
+                    for value in row.values.values()
+                )
+                if match:
+                    filtered.append(row)
+            self.rows = filtered
+
+        # Update filter info
+        if self.filterable:
+            self._filtered_count = len(self.rows)
+            total = len(self._all_rows)
+            if self._filter_text:
+                info_text = f"Filter: {self._filter_text} ({self._filtered_count} of {total} matches)"
+            else:
+                info_text = ""
+            filter_info = self.query_one("#filter-info", Static)
+            filter_info.update(info_text)
+
     def on_key(self, event) -> None:
         """Handle key presses."""
         from textual.events import Key
 
         if not isinstance(event, Key):
             return
+
+        # Handle / key to open/focus filter
+        if event.key == "slash" and self.filterable:
+            filter_input = self.query_one("#filter-input", Input)
+            # Only focus if filter is not already focused
+            if not filter_input.has_focus:
+                self.action_focus_filter()
+                event.prevent_default()
+                event.stop()
+                return
+
+        # Handle keys when filter input is focused
+        if self.filterable:
+            filter_input = self.query_one("#filter-input", Input)
+            if filter_input.has_focus:
+                # ESC - clear filter, hide it, return to table
+                if event.key == "escape":
+                    filter_input.value = ""
+                    self._filter_text = ""
+                    self._apply_filter()
+                    self._filter_visible = False
+                    data_table = self.query_one("#data-table", DataTable)
+                    data_table.focus()
+                    event.prevent_default()
+                    event.stop()
+                    return
+
+                # Tab or arrow keys - shift focus to table, hide filter if no text
+                if event.key in ("tab", "up", "down"):
+                    if not filter_input.value.strip():
+                        # No text, hide the filter
+                        self._filter_visible = False
+                    data_table = self.query_one("#data-table", DataTable)
+                    data_table.focus()
+                    event.prevent_default()
+                    event.stop()
+                    return
+
+                # Left/right arrows - allow normal text editing behavior
+                # (don't prevent default for these)
 
         # Allow tab/shift+tab to bubble up for screen-level focus navigation
         if event.key in ("tab", "shift+tab"):
@@ -560,10 +768,10 @@ class LayeredDataTable(Widget):
 
     def set_rows(self, new_rows: list[TableRow]) -> None:
         """
-        Replace all rows with new rows, preserving selection state.
+        Replace all rows with new rows, preserving selection state and cursor position.
 
-        This is more efficient than setting self.rows directly when you want
-        to preserve which rows are selected across updates.
+        Cursor position is automatically restored by tracking in _cursor_row_key.
+        This method focuses on restoring selection state.
         """
         # Get currently selected row keys (using row_key field)
         selected_keys = set()
@@ -571,28 +779,31 @@ class LayeredDataTable(Widget):
             for row_key in self._selected_rows:
                 if row_key in self._row_map:
                     table_row = self._row_map[row_key]
-                    if table_row.row_key:
+                    if table_row.row_key and isinstance(table_row.row_key, str):
                         selected_keys.add(table_row.row_key)
         elif self.select_mode == "radio":
             if self._selected_row and self._selected_row in self._row_map:
                 table_row = self._row_map[self._selected_row]
-                if table_row.row_key:
+                if table_row.row_key and isinstance(table_row.row_key, str):
                     selected_keys.add(table_row.row_key)
 
-        # Update rows (this will trigger rebuild)
+        # Update rows (this will trigger rebuild via watch_rows)
+        # Cursor position will be automatically restored by _rebuild_table()
         self.rows = new_rows
 
-        # Restore selection based on row_key
-        if selected_keys:
-            data_table = self.query_one("#data-table", DataTable)
-            for row_key, table_row in self._row_map.items():
-                if table_row.row_key in selected_keys:
-                    if self.select_mode == "multi":
-                        self._selected_rows.add(row_key)
-                        self._update_checkbox(row_key)
-                    elif self.select_mode == "radio":
-                        self._selected_row = row_key
-                        self._update_checkbox(row_key)
+        # Restore selection after rebuild completes
+        def restore_selection():
+            if selected_keys:
+                for dt_row_key, table_row in self._row_map.items():
+                    if table_row.row_key and table_row.row_key in selected_keys:
+                        if self.select_mode == "multi":
+                            self._selected_rows.add(dt_row_key)
+                            self._update_checkbox(dt_row_key)
+                        elif self.select_mode == "radio":
+                            self._selected_row = dt_row_key
+                            self._update_checkbox(dt_row_key)
+
+        self.call_after_refresh(restore_selection)
 
     @property
     def _rows(self) -> list[TableRow]:
@@ -636,6 +847,69 @@ class LayeredDataTable(Widget):
         for row_key in affected_keys:
             if row_key in self._row_map:
                 self._update_checkbox(row_key)
+
+    def toggle_rows_by_layer(self, layer: str) -> None:
+        """
+        Toggle selection of all rows in a specific layer without affecting other layers.
+        If all rows in the layer are selected, deselect them.
+        If any row in the layer is unselected, select all rows in the layer.
+        Only works in multi select mode.
+        """
+        if self.select_mode != "multi":
+            return
+
+        # Find all rows in this layer
+        layer_rows = [row_key for row_key, table_row in self._row_map.items()
+                     if table_row.layer == layer]
+
+        if not layer_rows:
+            return
+
+        # Check if all rows in layer are selected
+        all_selected = all(row_key in self._selected_rows for row_key in layer_rows)
+
+        # Toggle: if all selected, deselect; otherwise select all
+        if all_selected:
+            # Deselect all in layer
+            for row_key in layer_rows:
+                self._selected_rows.discard(row_key)
+        else:
+            # Select all in layer
+            for row_key in layer_rows:
+                self._selected_rows.add(row_key)
+
+        # Update checkboxes for all affected rows
+        for row_key in layer_rows:
+            self._update_checkbox(row_key)
+
+    def toggle_all_rows(self) -> None:
+        """
+        Toggle selection of all rows.
+        If all rows are selected, deselect all.
+        If any row is unselected, select all.
+        Only works in multi select mode.
+        """
+        if self.select_mode != "multi":
+            return
+
+        # Get all non-header row keys
+        all_rows = [row_key for row_key in self._row_map.keys()]
+
+        if not all_rows:
+            return
+
+        # Check if all rows are selected
+        all_selected = all(row_key in self._selected_rows for row_key in all_rows)
+
+        # Toggle: if all selected, deselect; otherwise select all
+        if all_selected:
+            self._selected_rows.clear()
+        else:
+            self._selected_rows.update(all_rows)
+
+        # Update checkboxes for all rows
+        for row_key in all_rows:
+            self._update_checkbox(row_key)
 
     def get_cursor_layer(self) -> Optional[str]:
         """Get the layer of the currently highlighted row."""

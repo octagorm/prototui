@@ -1,5 +1,5 @@
 # Virtual environments
-.venv
+.venv/
 venv/
 env/
 
@@ -9,14 +9,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-*.egg-info
-
-# Distribution / packaging
-build/
-dist/
-*.egg-info/
-*.egg
-prototui-builder.zip
 
 # macOS
 .DS_Store
@@ -30,3 +22,6 @@ prototui-builder.zip
 
 # Textual
 .textual/
+
+# Claude
+.claude/

@@ -1,1 +1,0 @@
-"""ProtoTUI applications package."""
