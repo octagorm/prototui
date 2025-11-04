@@ -34,26 +34,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.binding import Binding
 
 from utilities.layered_data_table import LayeredDataTable, TableRow
-
-
-class ExplanationPanel(Static):
-    """Side panel showing help/explanation text."""
-
-    can_focus = False
-
-    def __init__(self, title: str, content: str):
-        super().__init__()
-        self.panel_title = title
-        self.panel_content = content
-
-    def render(self) -> str:
-        return f"[bold]{self.panel_title}[/bold]\n\n{self.panel_content}"
-
-    def update_content(self, title: str, content: str) -> None:
-        """Update panel content dynamically."""
-        self.panel_title = title
-        self.panel_content = content
-        self.refresh()
+from utilities.explanation_panel import ExplanationPanel
 
 
 class ConfirmQuitScreen(Screen):
@@ -485,7 +466,6 @@ class AsyncStateDashboardApp(App):
 
     ExplanationPanel {
         width: 100%;
-        height: auto;
     }
     """
 

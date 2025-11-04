@@ -40,11 +40,12 @@ from typing import Callable
 
 from textual.app import ComposeResult
 from textual.screen import Screen
-from textual.widgets import Header, Footer, Static, Input, Label
+from textual.widgets import Header, Footer, Input, Label
 from textual.containers import Horizontal, VerticalScroll
 from textual.binding import Binding
 
 from .layered_data_table import LayeredDataTable, TableRow
+from .explanation_panel import ExplanationPanel
 
 
 @dataclass
@@ -65,27 +66,6 @@ class TableSelectionField:
     columns: list[str]
     rows: list[TableRow]
     required: bool = False
-
-
-class ExplanationPanel(Static):
-    """Side panel showing help/explanation text."""
-
-    # Prevent this panel from being focusable
-    can_focus = False
-
-    def __init__(self, title: str, content: str):
-        super().__init__()
-        self.panel_title = title
-        self.panel_content = content
-
-    def render(self) -> str:
-        return f"[bold]{self.panel_title}[/bold]\n\n{self.panel_content}"
-
-    def update_content(self, title: str, content: str) -> None:
-        """Update panel content dynamically."""
-        self.panel_title = title
-        self.panel_content = content
-        self.refresh()
 
 
 class FormScreen(Screen):
@@ -153,7 +133,6 @@ class FormScreen(Screen):
 
     ExplanationPanel {
         width: 100%;
-        height: auto;
     }
     """
 

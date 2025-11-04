@@ -1,6 +1,8 @@
 # ProtoTUI: Textual TUI Patterns for LLMs
 
-**Purpose:** This is a reference resource for LLMs (like Claude) to help build Textual TUIs. The patterns and utilities here are meant to be **copied and adapted** into the codebase where you're building a TUI, not imported as a library.
+**Purpose:** This is a **skill/reference resource** for LLMs (like Claude) to help build Textual TUIs. The patterns and utilities here are meant to be **copied and adapted** into the codebase where you're building a TUI.
+
+🚨 **This is NOT a library.** Do NOT import from prototui or add it as a dependency. Instead, **copy the files** into your project and modify them freely.
 
 The code is self-documenting with clear variable names, type hints, and comments. Read the pattern files directly - they show better than any written guide how to handle common TUI scenarios.
 
@@ -19,6 +21,9 @@ The code is self-documenting with clear variable names, type hints, and comments
 
 **Show a table as a dashboard with async operations with real-time updates?**
 → `patterns/async_state_dashboard.py`
+
+**Save configuration between sessions with persistent storage?**
+→ `patterns/persistent_storage.py`
 
 ---
 
@@ -114,6 +119,35 @@ The code is self-documenting with clear variable names, type hints, and comments
 - State tracking with visual feedback ("Deploying...", "Running", "Failed")
 
 **Run:** `python patterns/async_state_dashboard.py`
+
+---
+
+### 5. Persistent Storage
+**File:** `patterns/persistent_storage.py`
+
+**Use when:** Applications need to save configuration or state across sessions.
+
+**Examples:**
+- Multi-repo PR workflows with shared configuration
+- Tool preferences and settings
+- Session state management
+- User configuration for CLI tools
+
+**Key features:**
+- JSON-based configuration persistence
+- Form screen with conditional field visibility (CHANGE branch input shows/hides)
+- Pre-filled inputs from saved configuration
+- Review step before submission
+- Toast notifications for feedback
+- Metarepo PR workflow simulation
+- Two-press confirmation for destructive actions
+
+**What's persisted:**
+- Configuration saved to `persistent_storage.json`
+- Atomic writes prevent corruption
+- Simple get/set API with ConfigManager
+
+**Run:** `python patterns/persistent_storage.py`
 
 ---
 
@@ -253,185 +287,78 @@ state.watch("current_step", on_step_change)
 state.set("current_step", 2)  # Triggers callback
 ```
 
+### ExplanationPanel
+**File:** `utilities/explanation_panel.py`
+
+Reusable side panel widget for two-pane layouts showing help/explanation text.
+
+**Key features:**
+- Non-focusable (doesn't interfere with tab navigation)
+- Dynamic content updates with proper layout recalculation
+- Works correctly inside VerticalScroll containers
+- Properly expands to show all content without truncation
+
+**Important CSS setup:**
+- **DO NOT set `height`** on ExplanationPanel CSS
+- Let it naturally expand within VerticalScroll
+- Using `height: auto` can cause content truncation
+
+**Usage:**
+```python
+from utilities.explanation_panel import ExplanationPanel
+
+# In compose()
+with VerticalScroll(id="explanation-pane"):
+    yield ExplanationPanel(
+        "Help Title",
+        "Explanation content here...\n\nSupports multiple lines."
+    )
+
+# Update content dynamically
+panel = self.query_one(ExplanationPanel)
+panel.update_content("New Title", "New content...")
+```
+
+**CSS (Correct):**
+```css
+#explanation-pane {
+    width: 1fr;
+    height: 100%;
+    background: $panel;
+    border-left: solid $primary;
+    padding: 1 2;
+}
+
+ExplanationPanel {
+    width: 100%;
+    /* NO height property - let it expand naturally */
+}
+```
+
 ---
 
 ## Core Concepts
 
-### Two-Pane Layout (Standard across all patterns)
+### Two-Pane Layout
+Standard 2/3 content, 1/3 explanation:
 ```python
 with Horizontal(id="main-container"):
-    # Left: Main content (2fr = 2/3 of space)
-    with Vertical(id="content-pane"):
+    with Vertical(id="content-pane"):  # width: 2fr
         yield LayeredDataTable(...)
-
-    # Right: Explanation panel (1fr = 1/3 of space)
-    with VerticalScroll(id="explanation-pane"):
+    with VerticalScroll(id="explanation-pane"):  # width: 1fr
         yield ExplanationPanel(title, content)
 ```
 
-**CSS:**
-```python
-#content-pane {
-    width: 2fr;  # 2/3 of space
-}
-
-#explanation-pane {
-    width: 1fr;  # 1/3 of space
-    background: $panel;
-    border-left: solid $primary;
-}
-```
-
-### TableRow Structure
-```python
-from utilities.layered_data_table import TableRow
-
-row = TableRow(
-    values={"Service": "auth", "Status": "Running"},  # Column data
-    layer="Production",  # Optional grouping
-    row_key="auth-prod"  # Optional unique identifier
-)
-```
-
-### Filtering Pattern
-All table-based patterns support filtering with `/` key:
-- Press `/` to show filter input
-- Type to filter (matches any column)
-- Tab or arrow keys move to filtered results
-- ESC clears filter and returns to table
-- Shows "X of Y matches" counter
-- Auto-hides when empty and tabbing out
-
 ### Selection Modes
+- **`single`** - Cursor only, no indicator (standalone tables)
+- **`radio`** - Shows ● (tables in forms)
+- **`multi`** - Shows ○/● (selecting multiple items)
 
-**Single mode** - Cursor only, no visual indicator
-```python
-table = LayeredDataTable(..., select_mode="single")
-```
-Use when: Table is the only/main content
-
-**Radio mode** - Shows ● for selected item
-```python
-table = LayeredDataTable(..., select_mode="radio")
-```
-Use when: Table is part of a form with multiple fields
-
-**Multi mode** - Shows ☑ checkboxes
-```python
-table = LayeredDataTable(..., select_mode="multi")
-```
-Use when: Selecting multiple items
-
-### Review Step Pattern
-Most patterns show a review step before final submission:
-1. User fills out form/makes selection
-2. Press Enter → show review in explanation panel
-3. Press Enter again → confirm and submit
-4. Press ESC → return to editing
-
-### Quit Confirmation
-```python
-class ConfirmQuitScreen(Screen):
-    BINDINGS = [
-        Binding("y", "confirm_quit", "Yes", show=True),
-        Binding("n", "cancel_quit", "No", show=True),
-    ]
-
-    def on_mount(self):
-        self.notify("Are you sure you want to quit? (y/n)", severity="warning")
-
-# In main screen
-def action_request_quit(self):
-    self.app.push_screen(ConfirmQuitScreen())
-```
-
-### Async Operations Pattern
-```python
-async def _deploy_services(self, services: list[str]) -> None:
-    self._operation_in_progress = True
-
-    try:
-        # Show intermediate state
-        for service in services:
-            self.service_state[service]["status"] = "Deploying..."
-        self._update_table()
-
-        # Run in parallel
-        tasks = [self._deploy_single_service(s) for s in services]
-        await asyncio.gather(*tasks)
-
-        # Update UI as each completes (in _deploy_single_service)
-    finally:
-        self._operation_in_progress = False
-```
-
-### Two-Press Confirmation Pattern
-Prevents accidental destructive actions:
-```python
-def action_deploy(self):
-    if self._pending_action == "deploy":
-        # Second press - execute
-        self._pending_action = None
-        asyncio.create_task(self._do_deploy())
-    else:
-        # First press - show what will happen
-        self._pending_action = "deploy"
-        self._update_explanation(
-            "Confirm Deploy",
-            f"Deploy {count} services?\n\nPress (d) again to confirm."
-        )
-```
-
----
-
-## Best Practices
-
-### 1. Make Explanation Panes Non-Focusable
-```python
-def on_mount(self):
-    explanation_pane = self.query_one("#explanation-pane")
-    explanation_pane.can_focus = False
-```
-
-### 2. Update Subtitle for Context
-```python
-self.sub_title = f"Select Services ({count} selected)"
-```
-
-### 3. Consistent Binding Order
-Primary action → Secondary actions → Utility → Quit
-```python
-BINDINGS = [
-    Binding("enter", "submit", "Submit", show=True, priority=True),
-    Binding("l", "toggle_layer", "Toggle Layer", show=True),
-    Binding("a", "toggle_all", "Toggle All", show=True),
-    Binding("q", "request_quit", "Quit", show=True),
-]
-```
-
-### 4. Handle Tab When Nothing Focused
-When no widget is focused, Tab/Shift+Tab events go to the App, not the Screen. Handle with `on_key()`:
-```python
-def on_key(self, event) -> None:
-    if not self.focused and event.key == "tab":
-        event.prevent_default()
-        event.stop()
-        # Focus your first field
-```
-See `utilities/form_screen.py` for complete example.
-
-### 5. Use Reactive Properties for Real-Time Updates
-```python
-from textual.reactive import reactive
-
-class MyScreen(Screen):
-    filter_visible: reactive[bool] = reactive(False)
-
-    def watch_filter_visible(self, visible: bool) -> None:
-        # Automatically called when filter_visible changes
-        filter_input = self.query_one("#filter-input")
-        filter_input.display = visible
-```
+### Common Patterns
+- **Review Step** - Enter → review, Enter → confirm, ESC → back
+- **Two-Press Confirmation** - First press shows what will happen, second press executes
+- **Filtering** - Press `/` to filter table rows
+- **Async Operations** - Use `asyncio.gather()` for parallel operations with real-time UI updates
 
 ---
 
@@ -448,12 +375,37 @@ pip install textual
 
 ## How to Use This Resource
 
-1. **Browse the pattern files** to find the closest match for your use case
-2. **Copy the entire pattern file** into your project as a starting point
-3. **Copy any utilities** the pattern uses (`layered_data_table.py`, `form_screen.py`, etc.)
-4. **Adapt to your needs** - change data structure, add actions, modify styling
-5. **Read the code** - it's self-documenting with clear names and comments
+**IMPORTANT:** This is a **copy-paste resource**, not a library. Do NOT import from prototui or add it as a dependency.
 
-The patterns are complete, runnable examples. They demonstrate best practices through working code rather than written rules.
+### For AI Agents (LLMs):
+When helping users build a TUI:
+1. **Browse** pattern files to find the closest match
+2. **Copy** the entire pattern file into the user's project
+3. **Copy** utilities the pattern uses (e.g., `layered_data_table.py`, `explanation_panel.py`) into the user's project (e.g., `your_project/utils/`)
+4. **Adapt** the code to their specific needs - modify freely!
+5. **Explain** which pattern you chose and what changes you made
 
-**For LLMs:** When helping users build a TUI, reference these patterns and copy relevant code. Explain which pattern matches their use case and help adapt it to their specific needs.
+### Why Copy Instead of Import?
+
+✅ **Freedom to modify** - Change anything without breaking other projects
+✅ **No dependencies** - Don't worry about prototui updates
+✅ **Self-contained** - All code lives in your project
+✅ **Learn by doing** - Reading and adapting the code teaches TUI patterns
+
+### Step-by-Step Workflow:
+
+1. **Find the pattern** that matches your use case (see Quick Pattern Selection above)
+2. **Copy pattern file** → `your_project/screens/my_screen.py` (or however you want to organize it)
+3. **Copy utilities** → `your_project/utils/` (create this directory if needed)
+4. **Update imports** in the pattern file:
+   ```python
+   # Change this:
+   from utilities.layered_data_table import LayeredDataTable
+
+   # To this:
+   from utils.layered_data_table import LayeredDataTable
+   ```
+5. **Customize** - Adapt data structures, actions, styling, and behavior
+6. **Run** - Test and iterate
+
+The patterns are complete, runnable examples. They demonstrate best practices through working code rather than written rules. Treat them as **educational templates**, not library code.
