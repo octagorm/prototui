@@ -1,9 +1,9 @@
 """
-FormScreen Utility: Reusable form screen with text inputs and table selection.
+FormScreen Utility: Reusable form screen with text inputs and table selections.
 
 Provides a standardized two-pane form layout with:
 - Text input fields with validation
-- Table selection fields (using LayeredDataTable)
+- Multiple table selection fields (using LayeredDataTable)
 - Explanation panel on the right (1/3 of space)
 - Automatic focus management
 - Enter to submit with priority
@@ -18,17 +18,26 @@ Usage:
         TextField(id="notes", label="Notes", required=False),
     ]
 
-    table_field = TableSelectionField(
-        id="category",
-        label="Category",
-        columns=["Name", "Description"],
-        rows=[...],  # List of TableRow objects
-        required=True
-    )
+    table_fields = [
+        TableSelectionField(
+            id="category",
+            label="Category",
+            columns=["Name", "Description"],
+            rows=[...],  # List of TableRow objects
+            required=True
+        ),
+        TableSelectionField(
+            id="priority",
+            label="Priority",
+            columns=["Level", "SLA"],
+            rows=[...],
+            required=False
+        ),
+    ]
 
     screen = FormScreen(
         text_fields=text_fields,
-        table_field=table_field,
+        table_fields=table_fields,
         title="My Form",
         explanation_title="Help",
         explanation_content="Instructions here..."
@@ -70,12 +79,12 @@ class TableSelectionField:
 
 class FormScreen(Screen):
     """
-    Reusable form screen with text inputs and table selection.
+    Reusable form screen with text inputs and table selections.
 
     Features:
     - Two-pane layout (form 2/3, explanation 1/3)
     - Text input fields with validation
-    - Table selection field (radio mode with visual indicator)
+    - Multiple table selection fields (radio mode with visual indicator)
     - Required field validation
     - Automatic focus management
     - Enter to submit (priority binding)
@@ -138,8 +147,8 @@ class FormScreen(Screen):
 
     def __init__(
         self,
-        text_fields: list[TextField],
-        table_field: TableSelectionField,
+        text_fields: list[TextField] | None = None,
+        table_fields: list[TableSelectionField] | None = None,
         title: str = "Form",
         explanation_title: str = "Help",
         explanation_content: str = "",
@@ -149,16 +158,16 @@ class FormScreen(Screen):
         Initialize form screen.
 
         Args:
-            text_fields: List of TextField definitions
-            table_field: TableSelectionField definition
+            text_fields: List of TextField definitions (optional)
+            table_fields: List of TableSelectionField definitions (optional)
             title: Screen title
             explanation_title: Title for explanation panel
             explanation_content: Content for explanation panel
             on_quit: Optional callback when user quits without submitting
         """
         super().__init__()
-        self.text_fields = text_fields
-        self.table_field = table_field
+        self.text_fields = text_fields or []
+        self.table_fields = table_fields or []
         self.screen_title = title
         self.explanation_title = explanation_title
         self.explanation_content = explanation_content
@@ -184,20 +193,21 @@ class FormScreen(Screen):
                         id=field.id
                     )
 
-                # Table selection field
-                table_label = self.table_field.label
-                if not self.table_field.required:
-                    table_label += " (optional)"
-                yield Label(table_label)
-                yield LayeredDataTable(
-                    id=self.table_field.id,
-                    columns=self.table_field.columns,
-                    rows=self.table_field.rows,
-                    select_mode="radio",  # Radio mode shows ● indicator
-                    show_layers=False,
-                    show_column_headers=True,
-                    auto_height=True
-                )
+                # Table selection fields
+                for table_field in self.table_fields:
+                    table_label = table_field.label
+                    if not table_field.required:
+                        table_label += " (optional)"
+                    yield Label(table_label)
+                    yield LayeredDataTable(
+                        id=table_field.id,
+                        columns=table_field.columns,
+                        rows=table_field.rows,
+                        select_mode="radio",  # Radio mode shows ● indicator
+                        show_layers=False,
+                        show_column_headers=True,
+                        auto_height=True
+                    )
 
             # Right side: Explanation panel
             with VerticalScroll(id="explanation-pane"):
@@ -217,14 +227,16 @@ class FormScreen(Screen):
         form_pane.can_focus = False
         explanation_pane.can_focus = False
 
-        # Hide table cursor initially (shown only when focused)
-        def hide_table_cursor():
-            table = self.query_one(f"#{self.table_field.id}", LayeredDataTable)
-            inner_table = table.query_one("#data-table")
-            inner_table.show_cursor = False
+        # Hide table cursors initially (shown only when focused)
+        def hide_table_cursors():
+            for table_field in self.table_fields:
+                table = self.query_one(f"#{table_field.id}", LayeredDataTable)
+                inner_table = table.query_one("#data-table")
+                inner_table.show_cursor = False
 
-        # Delay hiding cursor until after LayeredDataTable's on_mount
-        self.call_after_refresh(hide_table_cursor)
+        # Delay hiding cursors until after LayeredDataTable's on_mount
+        if self.table_fields:
+            self.call_after_refresh(hide_table_cursors)
 
         # Focus on first input field after screen is fully mounted
         def focus_first_field():
@@ -256,9 +268,16 @@ class FormScreen(Screen):
             elif event.key == "shift+tab":
                 event.prevent_default()
                 event.stop()
-                table = self.query_one(f"#{self.table_field.id}", LayeredDataTable)
-                inner_table = table.query_one("#data-table")
-                inner_table.focus()
+                # Focus on last table field (or first text field if no tables)
+                if self.table_fields:
+                    last_table_field = self.table_fields[-1]
+                    table = self.query_one(f"#{last_table_field.id}", LayeredDataTable)
+                    inner_table = table.query_one("#data-table")
+                    inner_table.focus()
+                elif self.text_fields:
+                    first_field = self.text_fields[0]
+                    first_input = self.query_one(f"#{first_field.id}", Input)
+                    first_input.focus()
 
     def action_blur_focus(self) -> None:
         """Blur focus from current widget (ESC key), or exit review mode."""
@@ -319,18 +338,19 @@ class FormScreen(Screen):
 
                 values[field.id] = value
 
-        # Validate table selection
-        table = self.query_one(f"#{self.table_field.id}", LayeredDataTable)
-        selected_rows = table.get_selected_rows()
+        # Validate table selections
+        for table_field in self.table_fields:
+            table = self.query_one(f"#{table_field.id}", LayeredDataTable)
+            selected_rows = table.get_selected_rows()
 
-        if self.table_field.required and not selected_rows:
-            errors.append(f"{self.table_field.label} is required")
-            table.add_class("error")
-        else:
-            table.remove_class("error")
-            if selected_rows:
-                # Get selected row (radio mode = only one)
-                values[self.table_field.id] = selected_rows[0]
+            if table_field.required and not selected_rows:
+                errors.append(f"{table_field.label} is required")
+                table.add_class("error")
+            else:
+                table.remove_class("error")
+                if selected_rows:
+                    # Get selected row (radio mode = only one)
+                    values[table_field.id] = selected_rows[0]
 
         if errors:
             error_msg = "\n".join(errors)
@@ -357,14 +377,15 @@ class FormScreen(Screen):
                 label = field.label.rstrip(":")
                 review_lines.append(f"{label}: {value or 'N/A'}")
 
-        # Add table selection value
-        table_value = self._submitted_values.get(self.table_field.id)
-        if table_value:
-            label = self.table_field.label.rstrip(":")
-            # Format table row values
-            if isinstance(table_value, TableRow):
-                formatted = ", ".join(f"{v}" for v in table_value.values.values())
-                review_lines.append(f"{label}: {formatted}")
+        # Add table selection values
+        for table_field in self.table_fields:
+            table_value = self._submitted_values.get(table_field.id)
+            if table_value:
+                label = table_field.label.rstrip(":")
+                # Format table row values
+                if isinstance(table_value, TableRow):
+                    formatted = ", ".join(f"{v}" for v in table_value.values.values())
+                    review_lines.append(f"{label}: {formatted}")
 
         review_content = "\n".join(review_lines)
 

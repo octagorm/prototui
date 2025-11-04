@@ -92,34 +92,51 @@ class FormWithTableApp(App):
             ),
         ]
 
-        # Define table selection field using TableSelectionField
+        # Define table selection fields using TableSelectionField
         environment_rows = [
             TableRow({"Environment": "Development", "Region": "us-east-1"}),
             TableRow({"Environment": "Staging", "Region": "us-west-2"}),
             TableRow({"Environment": "Production", "Region": "eu-west-1"}),
         ]
 
-        table_field = TableSelectionField(
-            id="environment",
-            label="Environment:",
-            columns=["Environment", "Region"],
-            rows=environment_rows,
-            required=True
-        )
+        priority_rows = [
+            TableRow({"Priority": "Low", "SLA": "72 hours"}),
+            TableRow({"Priority": "Medium", "SLA": "24 hours"}),
+            TableRow({"Priority": "High", "SLA": "4 hours"}),
+            TableRow({"Priority": "Critical", "SLA": "1 hour"}),
+        ]
+
+        table_fields = [
+            TableSelectionField(
+                id="environment",
+                label="Environment:",
+                columns=["Environment", "Region"],
+                rows=environment_rows,
+                required=True
+            ),
+            TableSelectionField(
+                id="priority",
+                label="Priority:",
+                columns=["Priority", "SLA"],
+                rows=priority_rows,
+                required=False
+            ),
+        ]
 
         # Create form screen using FormScreen utility
         screen = FormScreen(
             text_fields=text_fields,
-            table_field=table_field,
+            table_fields=table_fields,
             title="Service Configuration",
             explanation_title="Configuration Form",
             explanation_content=(
                 "Configure your service deployment settings.\n\n"
                 "Fill in the service name and port number on the left. "
                 "Both fields are required. The description field is optional.\n\n"
-                "Use Tab to navigate between fields. When you reach the environment table, "
+                "Use Tab to navigate between fields. When you reach the tables, "
                 "use the arrow keys to browse and press Space to select. "
-                "A ● indicator shows your current selection.\n\n"
+                "A ● indicator shows your current selection in each table.\n\n"
+                "Environment is required, but priority is optional.\n\n"
                 "Press Enter to submit the form. If any required fields are missing, "
                 "they'll be highlighted with a red border.\n\n"
                 "Press ESC to unfocus any field, then 'q' to quit."
@@ -134,6 +151,9 @@ class FormWithTableApp(App):
             env_row = values.get("environment")
             env = env_row.values if env_row else {}
 
+            priority_row = values.get("priority")
+            priority = priority_row.values if priority_row else {}
+
             # Print to console
             print("\n" + "="*50)
             print("FORM SUBMITTED")
@@ -141,6 +161,7 @@ class FormWithTableApp(App):
             print(f"Service Name: {values.get('service_name')}")
             print(f"Port: {values.get('port')}")
             print(f"Environment: {env.get('Environment')} ({env.get('Region')})")
+            print(f"Priority: {priority.get('Priority', 'N/A')} ({priority.get('SLA', 'N/A')})")
             print(f"Description: {values.get('description') or 'N/A'}")
             print("="*50 + "\n")
 

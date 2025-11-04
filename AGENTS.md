@@ -85,7 +85,7 @@ The code is self-documenting with clear variable names, type hints, and comments
 
 **Key features:**
 - Text input fields with validation
-- Table selection (radio mode with ● indicator)
+- Multiple table selections (radio mode with ● indicator)
 - Required field validation
 - Visual error feedback (red borders)
 - Tab navigation between fields
@@ -204,7 +204,7 @@ table.set_rows(updated_rows)
 
 Reusable form screen with:
 - Text input fields with validation
-- Table selection field
+- Multiple table selection fields (any number)
 - Required field checking
 - Two-pane layout
 - Review step before submission
@@ -218,17 +218,26 @@ text_fields = [
     TextField(id="email", label="Email", placeholder="user@example.com"),
 ]
 
-table_field = TableSelectionField(
-    id="env",
-    label="Environment",
-    columns=["Name", "Region"],
-    rows=[...],  # List of TableRow
-    required=True
-)
+table_fields = [
+    TableSelectionField(
+        id="env",
+        label="Environment",
+        columns=["Name", "Region"],
+        rows=[...],  # List of TableRow
+        required=True
+    ),
+    TableSelectionField(
+        id="priority",
+        label="Priority",
+        columns=["Level", "SLA"],
+        rows=[...],
+        required=False
+    ),
+]
 
 screen = FormScreen(
     text_fields=text_fields,
-    table_field=table_field,
+    table_fields=table_fields,
     title="Create Service"
 )
 
