@@ -65,6 +65,7 @@ class TextField:
     placeholder: str = ""
     required: bool = False
     validator: Callable[[str], str | None] | None = None  # Returns error message or None
+    visible_when: Callable[[dict], bool] | None = None  # Function to determine visibility based on current values
 
 
 @dataclass
@@ -75,6 +76,7 @@ class TableSelectionField:
     columns: list[str]
     rows: list[TableRow]
     required: bool = False
+    visible_when: Callable[[dict], bool] | None = None  # Function to determine visibility based on current values
 
 
 class FormScreen(Screen):
@@ -149,6 +151,7 @@ class FormScreen(Screen):
         self,
         text_fields: list[TextField] | None = None,
         table_fields: list[TableSelectionField] | None = None,
+        fields: list[TextField | TableSelectionField] | None = None,
         title: str = "Form",
         explanation_title: str = "Help",
         explanation_content: str = "",
@@ -158,16 +161,28 @@ class FormScreen(Screen):
         Initialize form screen.
 
         Args:
-            text_fields: List of TextField definitions (optional)
-            table_fields: List of TableSelectionField definitions (optional)
+            text_fields: List of TextField definitions (optional, legacy parameter)
+            table_fields: List of TableSelectionField definitions (optional, legacy parameter)
+            fields: List of mixed TextField and TableSelectionField in desired order (optional)
+                   If provided, text_fields and table_fields are ignored.
             title: Screen title
             explanation_title: Title for explanation panel
             explanation_content: Content for explanation panel
             on_quit: Optional callback when user quits without submitting
         """
         super().__init__()
-        self.text_fields = text_fields or []
-        self.table_fields = table_fields or []
+        
+        # Support both old API (separate text_fields/table_fields) and new API (mixed fields)
+        if fields:
+            self.fields = fields
+            self.text_fields = [f for f in fields if isinstance(f, TextField)]
+            self.table_fields = [f for f in fields if isinstance(f, TableSelectionField)]
+        else:
+            self.text_fields = text_fields or []
+            self.table_fields = table_fields or []
+            # Preserve old behavior: text fields first, then table fields
+            self.fields = self.text_fields + self.table_fields
+        
         self.screen_title = title
         self.explanation_title = explanation_title
         self.explanation_content = explanation_content
@@ -181,33 +196,50 @@ class FormScreen(Screen):
         with Horizontal(id="main-container"):
             # Left side: Form
             with VerticalScroll(id="form-pane"):
-                # Text input fields
-                for field in self.text_fields:
-                    # Add "(optional)" to label if not required
-                    label_text = field.label
-                    if not field.required:
-                        label_text += " (optional)"
-                    yield Label(label_text)
-                    yield Input(
-                        placeholder=field.placeholder,
-                        id=field.id
-                    )
-
-                # Table selection fields
-                for table_field in self.table_fields:
-                    table_label = table_field.label
-                    if not table_field.required:
-                        table_label += " (optional)"
-                    yield Label(table_label)
-                    yield LayeredDataTable(
-                        id=table_field.id,
-                        columns=table_field.columns,
-                        rows=table_field.rows,
-                        select_mode="radio",  # Radio mode shows ● indicator
-                        show_layers=False,
-                        show_column_headers=True,
-                        auto_height=True
-                    )
+                # Render fields in order
+                for field in self.fields:
+                    if isinstance(field, TextField):
+                        # Text input field
+                        label_text = field.label
+                        if not field.required:
+                            label_text += " (optional)"
+                        
+                        label = Label(label_text)
+                        label.add_class(f"field-label-{field.id}")
+                        yield label
+                        
+                        input_widget = Input(
+                            placeholder=field.placeholder,
+                            id=field.id
+                        )
+                        if field.visible_when:
+                            label.display = False
+                            input_widget.display = False
+                        yield input_widget
+                    
+                    elif isinstance(field, TableSelectionField):
+                        # Table selection field
+                        table_label = field.label
+                        if not field.required:
+                            table_label += " (optional)"
+                        
+                        label = Label(table_label)
+                        label.add_class(f"field-label-{field.id}")
+                        yield label
+                        
+                        table = LayeredDataTable(
+                            id=field.id,
+                            columns=field.columns,
+                            rows=field.rows,
+                            select_mode="radio",
+                            show_layers=False,
+                            show_column_headers=True,
+                            auto_height=True
+                        )
+                        if field.visible_when:
+                            label.display = False
+                            table.display = False
+                        yield table
 
             # Right side: Explanation panel
             with VerticalScroll(id="explanation-pane"):
@@ -238,12 +270,19 @@ class FormScreen(Screen):
         if self.table_fields:
             self.call_after_refresh(hide_table_cursors)
 
-        # Focus on first input field after screen is fully mounted
+        # Focus on first field after screen is fully mounted
         def focus_first_field():
+            # Focus on first text field if available
             if self.text_fields:
                 first_field = self.text_fields[0]
                 first_input = self.query_one(f"#{first_field.id}", Input)
                 first_input.focus()
+            # Otherwise focus on first table field if available
+            elif self.table_fields:
+                first_table_field = self.table_fields[0]
+                table = self.query_one(f"#{first_table_field.id}", LayeredDataTable)
+                inner_table = table.query_one("#data-table")
+                inner_table.focus()
 
         self.call_after_refresh(focus_first_field)
 
@@ -261,23 +300,89 @@ class FormScreen(Screen):
             if event.key == "tab":
                 event.prevent_default()
                 event.stop()
+                # Focus on first text field if available
                 if self.text_fields:
                     first_field = self.text_fields[0]
                     first_input = self.query_one(f"#{first_field.id}", Input)
                     first_input.focus()
+                # Otherwise focus on first table field if available
+                elif self.table_fields:
+                    first_table_field = self.table_fields[0]
+                    table = self.query_one(f"#{first_table_field.id}", LayeredDataTable)
+                    inner_table = table.query_one("#data-table")
+                    inner_table.focus()
             elif event.key == "shift+tab":
                 event.prevent_default()
                 event.stop()
-                # Focus on last table field (or first text field if no tables)
+                # Focus on last field (table fields come after text fields)
                 if self.table_fields:
                     last_table_field = self.table_fields[-1]
                     table = self.query_one(f"#{last_table_field.id}", LayeredDataTable)
                     inner_table = table.query_one("#data-table")
                     inner_table.focus()
                 elif self.text_fields:
-                    first_field = self.text_fields[0]
-                    first_input = self.query_one(f"#{first_field.id}", Input)
-                    first_input.focus()
+                    last_text_field = self.text_fields[-1]
+                    last_input = self.query_one(f"#{last_text_field.id}", Input)
+                    last_input.focus()
+
+    def get_current_values(self) -> dict:
+        """
+        Get current form values (used for visibility conditions and dynamic updates).
+        
+        Returns:
+            Dictionary with current values from all fields.
+        """
+        values = {}
+        
+        # Get text field values
+        for field in self.text_fields:
+            try:
+                input_widget = self.query_one(f"#{field.id}", Input)
+                values[field.id] = input_widget.value.strip()
+            except:
+                pass
+        
+        # Get table selections
+        for table_field in self.table_fields:
+            try:
+                table = self.query_one(f"#{table_field.id}", LayeredDataTable)
+                selected_rows = table.get_selected_rows()
+                if selected_rows:
+                    values[table_field.id] = selected_rows[0]
+            except:
+                pass
+        
+        return values
+    
+    def _update_field_visibility(self) -> None:
+        """Update visibility of conditional fields based on current values."""
+        current_values = self.get_current_values()
+        
+        # Update text field visibility
+        for field in self.text_fields:
+            if field.visible_when:
+                should_show = field.visible_when(current_values)
+                try:
+                    input_widget = self.query_one(f"#{field.id}", Input)
+                    label = self.query_one(f".field-label-{field.id}", Label)
+                    
+                    input_widget.display = should_show
+                    label.display = should_show
+                except:
+                    pass
+        
+        # Update table field visibility
+        for table_field in self.table_fields:
+            if table_field.visible_when:
+                should_show = table_field.visible_when(current_values)
+                try:
+                    table = self.query_one(f"#{table_field.id}", LayeredDataTable)
+                    label = self.query_one(f".field-label-{table_field.id}", Label)
+                    
+                    table.display = should_show
+                    label.display = should_show
+                except:
+                    pass
 
     def action_blur_focus(self) -> None:
         """Blur focus from current widget (ESC key), or exit review mode."""
@@ -306,6 +411,19 @@ class FormScreen(Screen):
         # Hide cursor when table loses focus
         if event.widget.id == "data-table":
             event.widget.show_cursor = False
+    
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Handle input changes to update conditional field visibility."""
+        self._update_field_visibility()
+    
+    def on_layered_data_table_row_selected(self, event) -> None:
+        """Handle table selection changes."""
+        # Update conditional field visibility
+        self._update_field_visibility()
+        
+        # Call external callback if provided (for dynamic row updates)
+        if hasattr(self, '_table_selection_callback') and self._table_selection_callback:
+            self._table_selection_callback(event)
 
     def action_submit(self) -> None:
         """Validate and submit the form."""
@@ -320,6 +438,11 @@ class FormScreen(Screen):
         # Validate text fields
         for field in self.text_fields:
             input_widget = self.query_one(f"#{field.id}", Input)
+            
+            # Skip validation for hidden fields
+            if not input_widget.display:
+                continue
+            
             value = input_widget.value.strip()
 
             if field.required and not value:
@@ -341,6 +464,11 @@ class FormScreen(Screen):
         # Validate table selections
         for table_field in self.table_fields:
             table = self.query_one(f"#{table_field.id}", LayeredDataTable)
+            
+            # Skip validation for hidden fields
+            if not table.display:
+                continue
+            
             selected_rows = table.get_selected_rows()
 
             if table_field.required and not selected_rows:

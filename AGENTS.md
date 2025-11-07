@@ -86,11 +86,62 @@ The code is self-documenting with clear variable names, type hints, and comments
 **Key features:**
 - Text input fields with validation
 - Multiple table selections (radio mode with ● indicator)
+- **Conditional fields** (shown/hidden based on selections via `visible_when`)
+- **Dynamic table rows** (tables that update based on other selections)
 - Required field validation
 - Visual error feedback (red borders)
 - Tab navigation between fields
 - Enter to submit with review step
 - Two-pane layout with explanation panel
+
+**Conditional fields example:**
+```python
+# Text field only shown when deployment_type is "kubernetes"
+TextField(
+    id="namespace",
+    label="Kubernetes Namespace:",
+    visible_when=lambda values: (
+        values.get("deployment_type") and 
+        values.get("deployment_type").row_key == "kubernetes"
+    )
+)
+
+# Table field only shown for Kubernetes
+TableSelectionField(
+    id="replica_count",
+    label="Replica Count:",
+    columns=["Replicas", "Use Case"],
+    rows=[...],
+    visible_when=lambda values: (
+        values.get("deployment_type") and 
+        values.get("deployment_type").row_key == "kubernetes"
+    )
+)
+```
+
+**Dynamic table rows example:**
+```python
+# Update priority rows when environment changes
+def update_priority_rows(form_screen):
+    values = form_screen.get_current_values()
+    env_row = values.get("environment")
+    
+    priority_table = form_screen.query_one("#priority", LayeredDataTable)
+    
+    if env_row.row_key == "prod":
+        # Production gets more priority levels
+        new_rows = [low, medium, high, critical]
+    else:
+        # Dev/Staging only gets low/medium
+        new_rows = [low, medium]
+    
+    priority_table.set_rows(new_rows)
+
+# Attach callback for selection changes
+screen._table_selection_callback = lambda event: (
+    update_priority_rows(screen) if event.data_table.id == "environment" else None
+)
+```
 
 **Why radio mode here?** When a table is part of a form with multiple fields, the ● indicator provides visual feedback while tabbing between fields. For standalone table selection, no indicator is needed (see layered_list_selection).
 
@@ -213,18 +264,22 @@ Reusable form screen with:
 ```python
 from utilities.form_screen import FormScreen, TextField, TableSelectionField
 
-text_fields = [
+# Define fields in desired order (mix text and table fields)
+fields = [
     TextField(id="name", label="Name", required=True),
     TextField(id="email", label="Email", placeholder="user@example.com"),
-]
-
-table_fields = [
     TableSelectionField(
         id="env",
         label="Environment",
         columns=["Name", "Region"],
         rows=[...],  # List of TableRow
         required=True
+    ),
+    # Conditional field appears right after env table
+    TextField(
+        id="namespace",
+        label="Namespace",
+        visible_when=lambda values: values.get("env") is not None
     ),
     TableSelectionField(
         id="priority",
@@ -236,8 +291,14 @@ table_fields = [
 ]
 
 screen = FormScreen(
-    text_fields=text_fields,
-    table_fields=table_fields,
+    fields=fields,  # New API: mixed fields in desired order
+    title="Create Service"
+)
+
+# Legacy API still supported (text fields first, then table fields):
+screen = FormScreen(
+    text_fields=[...],
+    table_fields=[...],
     title="Create Service"
 )
 

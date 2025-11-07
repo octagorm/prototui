@@ -117,10 +117,11 @@ class LayeredDataTable(Widget):
     class RowSelected(Message):
         """Posted when a row is selected (Enter key in single-select mode)."""
 
-        def __init__(self, row: TableRow, row_key: RowKey) -> None:
+        def __init__(self, row: TableRow, row_key: RowKey, table_id: str | None = None) -> None:
             super().__init__()
             self.row = row
             self.row_key = row_key
+            self.table_id = table_id
 
     class RowHighlighted(Message):
         """Posted when a row is highlighted (cursor movement)."""
@@ -460,10 +461,10 @@ class LayeredDataTable(Widget):
                 self._update_checkbox(event.row_key)
 
                 # Post selection message
-                self.post_message(self.RowSelected(row, event.row_key))
+                self.post_message(self.RowSelected(row, event.row_key, self.id))
             else:  # single or none mode
                 # In single/none mode, Enter selects the row (no visual change)
-                self.post_message(self.RowSelected(row, event.row_key))
+                self.post_message(self.RowSelected(row, event.row_key, self.id))
 
     @on(DataTable.RowHighlighted)
     def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -516,7 +517,7 @@ class LayeredDataTable(Widget):
 
             # Post selection message
             row = self._row_map[row_key]
-            self.post_message(self.RowSelected(row, row_key))
+            self.post_message(self.RowSelected(row, row_key, self.id))
 
     def action_focus_filter(self) -> None:
         """Focus the filter input (/ key)."""
