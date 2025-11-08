@@ -25,6 +25,9 @@ The code is self-documenting with clear variable names, type hints, and comments
 **Save configuration between sessions with persistent storage?**
 → `patterns/persistent_storage.py`
 
+**Show stage-based progress bars across table columns with controllable gaps?**
+→ `patterns/progress_bar_table.py`
+
 ---
 
 ## Pattern Files
@@ -202,6 +205,37 @@ screen._table_selection_callback = lambda event: (
 
 ---
 
+### 6. Progress Bar Table
+**File:** `patterns/progress_bar_table.py`
+
+**Use when:** Visualizing stage-based progress across table columns with fine control over filled segments.
+
+**Examples:**
+- CI/CD pipeline stages (build → test → deploy → verify)
+- Task workflow steps with visual progress
+- Multi-column status indicators
+
+**Key features:**
+- **Stage-based progress** using list notation: `[1, 1.5, 2, 2.5, 3]`
+  - Integers (1, 2, 3, 4) = fill progress columns
+  - Decimals (1.5, 2.5, 3.5) = fill gaps between columns
+- **Non-contiguous segments**: `[1, 2.5, 3]` skips column 2 but fills gap 2-3
+- Pre-progress columns (ID, Type) with normal gaps
+- Progress columns (Issue, Status, Owner, Priority) with controllable gaps
+- Multi-select with properly padded checkboxes
+- Dynamic column widths based on content
+- `ProgressBarDataTable` subclass (extends LayeredDataTable with padded checkboxes)
+
+**Technical details:**
+- `GAP_WIDTH = 2` for visible gaps
+- `cell_padding = 0` removes default DataTable gaps
+- Manual trailing spaces create controllable gaps
+- Rich Text for selective reverse styling
+
+**Run:** `python patterns/progress_bar_table.py`
+
+---
+
 ## Utility Files
 
 All utilities are in `utilities/` and meant to be copied into your project.
@@ -209,323 +243,144 @@ All utilities are in `utilities/` and meant to be copied into your project.
 ### LayeredDataTable
 **File:** `utilities/layered_data_table.py`
 
-Reusable table widget with:
-- Grouped/layered data with visual headers
-- Three selection modes: `single`, `radio`, `multi`
-- Filter with `/` key (when `filterable=True`)
-- Layer-based selection helpers
-- Selection state tracking
-- **Automatic cursor position preservation** across table updates
+Reusable table widget with grouped/layered data, selection modes (`single`, `radio`, `multi`), filtering, and automatic cursor preservation.
 
 **Usage:**
 ```python
 from utilities.layered_data_table import LayeredDataTable, TableRow
 
 rows = [
-    TableRow(
-        {"Service": "auth", "Status": "Running"},
-        layer="Production",
-        row_key="auth-prod"  # Used to preserve cursor position
-    ),
-    TableRow(
-        {"Service": "api", "Status": "Running"},
-        layer="Production",
-        row_key="api-prod"
-    ),
+    TableRow({"Service": "auth", "Status": "Running"}, layer="Production", row_key="auth-prod"),
+    TableRow({"Service": "api", "Status": "Running"}, layer="Production", row_key="api-prod"),
 ]
 
 table = LayeredDataTable(
-    id="services",
-    columns=["Service", "Status"],
-    rows=rows,
-    select_mode="multi",
-    show_layers=True,
-    filterable=True
+    id="services", columns=["Service", "Status"], rows=rows,
+    select_mode="multi", show_layers=True, filterable=True
 )
 
-# Get selections
 selected = table.get_selected_rows()  # Returns list[TableRow]
+table.set_rows(updated_rows)  # Cursor stays on same row_key
+```
 
-# Update table data (cursor stays on same row_key)
-table.set_rows(updated_rows)
+**Custom subclass for progress bars:**
+For patterns requiring padded checkboxes (like progress_bar_table), subclass and override `_update_checkbox()`:
+
+```python
+from utilities.layered_data_table import LayeredDataTable
+
+class ProgressBarDataTable(LayeredDataTable):
+    def _update_checkbox(self, row_key):
+        # Custom checkbox logic with padding
+        checkbox = "●" if row_key in self._selected_rows else "○"
+        padded = f"  {checkbox}  "  # 2 spaces on each side
+        self.query_one("#data-table").update_cell(row_key, "checkbox", padded)
 ```
 
 ### FormScreen
 **File:** `utilities/form_screen.py`
 
-Reusable form screen with:
-- Text input fields with validation
-- Multiple table selection fields (any number)
-- Required field checking
-- Two-pane layout
-- Review step before submission
+Form screen with text/table fields, validation, conditional visibility, and review step.
 
-**Usage:**
 ```python
 from utilities.form_screen import FormScreen, TextField, TableSelectionField
 
-# Define fields in desired order (mix text and table fields)
 fields = [
     TextField(id="name", label="Name", required=True),
-    TextField(id="email", label="Email", placeholder="user@example.com"),
-    TableSelectionField(
-        id="env",
-        label="Environment",
-        columns=["Name", "Region"],
-        rows=[...],  # List of TableRow
-        required=True
-    ),
-    # Conditional field appears right after env table
-    TextField(
-        id="namespace",
-        label="Namespace",
-        visible_when=lambda values: values.get("env") is not None
-    ),
-    TableSelectionField(
-        id="priority",
-        label="Priority",
-        columns=["Level", "SLA"],
-        rows=[...],
-        required=False
-    ),
+    TableSelectionField(id="env", label="Environment", columns=[...], rows=[...]),
+    TextField(id="namespace", label="Namespace",
+              visible_when=lambda vals: vals.get("env") is not None),  # Conditional
 ]
 
-screen = FormScreen(
-    fields=fields,  # New API: mixed fields in desired order
-    title="Create Service"
-)
-
-# Legacy API still supported (text fields first, then table fields):
-screen = FormScreen(
-    text_fields=[...],
-    table_fields=[...],
-    title="Create Service"
-)
-
+screen = FormScreen(fields=fields, title="Create Service")
 self.push_screen(screen, callback)
 ```
 
 ### Async Helpers
 **File:** `utilities/async_helpers.py`
 
-Optional helpers for common async patterns. The patterns use `asyncio` directly, but these helpers show what's possible:
-- `run_with_timeout()` - Run operation with timeout
-- `poll_until()` - Poll a condition until true
-- `run_parallel()` - Run operations in parallel (wraps `asyncio.gather()`)
-- `run_parallel_with_limit()` - Parallel with concurrency limit
-- `retry_with_backoff()` - Retry with exponential backoff
-- `AsyncQueue` - Simple async queue
+Optional helpers: `run_parallel()`, `retry_with_backoff()`, `poll_until()`, `run_with_timeout()`, etc.
 
-**Usage:**
 ```python
 from utilities.async_helpers import run_parallel, retry_with_backoff
 
-# Run multiple operations in parallel
-results = await run_parallel(
-    lambda: fetch_repos(),
-    lambda: fetch_prs(),
-    lambda: fetch_builds(),
-)
-
-# Retry unstable operation
-result = await retry_with_backoff(
-    lambda: unstable_api_call(),
-    max_retries=5
-)
+results = await run_parallel(fetch_repos, fetch_prs, fetch_builds)
+result = await retry_with_backoff(unstable_api_call, max_retries=5)
 ```
 
 ### State Manager
 **File:** `utilities/state_manager.py`
 
-Simple state management with:
-- Get/set/update/delete state
-- Watch for state changes with callbacks
-- Multi-step workflow state tracking
+Simple state management with get/set/watch callbacks.
 
-**Usage:**
 ```python
 from utilities.state_manager import StateManager
 
 state = StateManager()
-state.set("current_step", 1)
-
-# Watch for changes
-def on_step_change(change):
-    print(f"Step: {change.old_value} → {change.new_value}")
-
-state.watch("current_step", on_step_change)
-state.set("current_step", 2)  # Triggers callback
+state.watch("step", lambda change: print(f"{change.old_value} → {change.new_value}"))
+state.set("step", 2)  # Triggers callback
 ```
 
 ### Terminal Compatibility (IMPORTANT)
 **File:** `utilities/terminal_compat.py`
 
-**CRITICAL**: Always use this instead of `app.run()` to ensure proper colors across terminals.
+**Always use instead of `app.run()`** - auto-detects terminal capabilities and enables truecolor.
 
-**Problems this solves:**
-1. **Colors**: Some terminals (like IntelliJ) don't advertise truecolor support even though they have it
-
-**The solution:**
-- Detects terminal capabilities and enables truecolor when appropriate
-- Sets `COLORTERM=truecolor` at import time (before App instantiation)
-- Provides environment variable overrides for user control
-
-**Usage:**
 ```python
 from utilities.terminal_compat import run_app
 
-app = MyApp()
-run_app(app)  # Auto-handles colors!
+run_app(MyApp())  # Auto-handles colors
+run_app(app, mouse=False)  # Keyboard-only mode
 
-# Disable mouse if preferred (keyboard-only mode):
-run_app(app, mouse=False)
-
-# With other run args:
-run_app(app, inline=True)
+# Environment overrides:
+# export TUI_MOUSE=false
+# export TUI_COLOR_SYSTEM=256
 ```
 
-**What it does automatically:**
-- ✅ Detects IntelliJ/JetBrains terminal → enables truecolor
-- ✅ Detects 256color terminals → upgrades to truecolor
-- ✅ Sets `COLORTERM=truecolor` for child processes
-- ✅ Respects user env var overrides
-
-**Why this matters:** Without this, colors look washed out in IntelliJ IDEA's terminal. All patterns use this by default.
-
-**About IntelliJ mouse behavior:**
-IntelliJ's terminal (JediTerm) has slightly glitchy mouse scrolling - it can feel fast or jumpy. This is a known limitation of the terminal emulator. Users who prefer keyboard-only mode can disable mouse:
-
-**Environment variable overrides:**
-```bash
-# Disable mouse globally (keyboard-only mode)
-export TUI_MOUSE=false
-
-# Force specific color system
-export TUI_COLOR_SYSTEM=256
-```
-
----
+Fixes washed-out colors in IntelliJ and other terminals that don't advertise truecolor properly.
 
 ### ExplanationPanel
 **File:** `utilities/explanation_panel.py`
 
-Reusable side panel widget for two-pane layouts showing help/explanation text.
+Non-focusable side panel for two-pane layouts. **Important:** Don't set `height` on ExplanationPanel CSS - let it expand naturally in VerticalScroll.
 
-**Key features:**
-- Non-focusable (doesn't interfere with tab navigation)
-- Dynamic content updates with proper layout recalculation
-- Works correctly inside VerticalScroll containers
-- Properly expands to show all content without truncation
-
-**Important CSS setup:**
-- **DO NOT set `height`** on ExplanationPanel CSS
-- Let it naturally expand within VerticalScroll
-- Using `height: auto` can cause content truncation
-
-**Usage:**
 ```python
 from utilities.explanation_panel import ExplanationPanel
-from textual.containers import VerticalScroll
 
-# In compose()
 with VerticalScroll(id="explanation-pane"):
-    yield ExplanationPanel(
-        "Help Title",
-        "Explanation content here...\n\nSupports multiple lines."
-    )
+    yield ExplanationPanel("Title", "Content...")
 
-# Update content dynamically
-panel = self.query_one(ExplanationPanel)
-panel.update_content("New Title", "New content...")
-```
-
-**CSS (Correct):**
-```css
-#explanation-pane {
-    width: 1fr;
-    height: 100%;
-    background: $panel;
-    border-left: solid $primary;
-    padding: 1 2;
-}
-
-ExplanationPanel {
-    width: 100%;
-    /* NO height property - let it expand naturally */
-}
+panel.update_content("New Title", "New content...")  # Dynamic updates
 ```
 
 ---
 
 ## Core Concepts
 
-### Two-Pane Layout
-Standard 2/3 content, 1/3 explanation:
-```python
-with Horizontal(id="main-container"):
-    with Vertical(id="content-pane"):  # width: 2fr
-        yield LayeredDataTable(...)
-    with VerticalScroll(id="explanation-pane"):  # width: 1fr
-        yield ExplanationPanel(title, content)
-```
+**Two-Pane Layout:** 2/3 content, 1/3 explanation (Horizontal with Vertical + VerticalScroll)
 
-### Selection Modes
-- **`single`** - Cursor only, no indicator (standalone tables)
-- **`radio`** - Shows ● (tables in forms)
-- **`multi`** - Shows ○/● (selecting multiple items)
+**Selection Modes:** `single` (cursor only), `radio` (● indicator), `multi` (○/● checkboxes)
 
-### Common Patterns
-- **Review Step** - Enter → review, Enter → confirm, ESC → back
-- **Two-Press Confirmation** - First press shows what will happen, second press executes
-- **Filtering** - Press `/` to filter table rows
-- **Async Operations** - Use `asyncio.gather()` for parallel operations with real-time UI updates
+**Common Patterns:** Review step (Enter→review→confirm, ESC→back), Two-press confirmation, `/` for filtering, `asyncio.gather()` for parallel async operations
 
----
-
-## Installation
-
-All patterns use only Textual:
-```bash
-uv add textual
-# or
-pip install textual
-```
+**Installation:** `uv add textual` or `pip install textual`
 
 ---
 
 ## How to Use This Resource
 
-**IMPORTANT:** This is a **copy-paste resource**, not a library. Do NOT import from prototui or add it as a dependency.
+**IMPORTANT:** This is a **copy-paste resource**, not a library. Do NOT import from prototui.
 
 ### For AI Agents (LLMs):
-When helping users build a TUI:
-1. **Browse** pattern files to find the closest match
-2. **Copy** the entire pattern file into the user's project
-3. **Copy** utilities the pattern uses (e.g., `layered_data_table.py`, `explanation_panel.py`) into the user's project (e.g., `your_project/utils/`)
-4. **Adapt** the code to their specific needs - modify freely!
-5. **Explain** which pattern you chose and what changes you made
+1. **Browse** patterns to find closest match
+2. **Copy** pattern + utilities into user's project
+3. **Update imports** (e.g., `from utilities.X` → `from utils.X`)
+4. **Adapt** code freely - modify data structures, actions, styling
+5. **Explain** which pattern you chose and changes made
 
 ### Why Copy Instead of Import?
+✅ Freedom to modify ✅ No dependencies ✅ Self-contained ✅ Learn by doing
 
-✅ **Freedom to modify** - Change anything without breaking other projects
-✅ **No dependencies** - Don't worry about prototui updates
-✅ **Self-contained** - All code lives in your project
-✅ **Learn by doing** - Reading and adapting the code teaches TUI patterns
+**Workflow:** Find pattern → Copy files → Update imports → Customize → Test
 
-### Step-by-Step Workflow:
-
-1. **Find the pattern** that matches your use case (see Quick Pattern Selection above)
-2. **Copy pattern file** → `your_project/screens/my_screen.py` (or however you want to organize it)
-3. **Copy utilities** → `your_project/utils/` (create this directory if needed)
-4. **Update imports** in the pattern file:
-   ```python
-   # Change this:
-   from utilities.layered_data_table import LayeredDataTable
-
-   # To this:
-   from utils.layered_data_table import LayeredDataTable
-   ```
-5. **Customize** - Adapt data structures, actions, styling, and behavior
-6. **Run** - Test and iterate
-
-The patterns are complete, runnable examples. They demonstrate best practices through working code rather than written rules. Treat them as **educational templates**, not library code.
+Patterns are educational templates showing best practices through working code, not library code.
